@@ -11,7 +11,7 @@ import Prelude hiding (catch)
 import Data.Array.IO
 import System.Random
 
-server = "irc.freenode.net"
+server = "avaraline.net"
 port = 6667
 chan = "#bj"
 nickname = "BJBOT"
@@ -151,7 +151,7 @@ run = do
     write "JOIN" chan
     forever $ do
         sock <- asks socket
-        line <- readLine sock
+        line <- readLine
         case command line of UNKNOWN _ -> io (print line)
                              _ -> return ()
   where forever a = a >> forever a
@@ -172,6 +172,7 @@ parseIRC l =
             ("PRIVMSG":dest:args) -> (PRIVMSG dest, args)
             ("NOTICE":dest:args) -> (NOTICE dest, args)
             ["JOIN", channel] -> (JOIN channel, args)
+            ["JOIN"] -> (JOIN (head args), tail args)
             ["MODE", user] -> (MODE user, args)
             ["375", dest] -> (BEGINMOTD dest, [])
             ["372", dest] -> (CONTINUEMOTD dest, [])
@@ -180,8 +181,9 @@ parseIRC l =
             f -> (UNKNOWN f, f) in
     IRCLine {source=NoSource, command=command', payload=drop 1 pload}
 
-readLine :: Handle -> Net IRCLine
-readLine h = do
+readLine :: Net IRCLine
+readLine = do
+    h <- asks socket
     s <- init `fmap` io (hGetLine h)
     -- io (putStrLn s)
     return (parseIRC s)
