@@ -17,7 +17,7 @@ chan = "#bj"
 nickname = "BJBOT"
 
 data Suit = Spades | Hearts | Diamonds | Clubs deriving (Enum, Show)
-data Card = Card { 
+data Card = Card {
       rank :: Integer
     , suit :: Suit
     } deriving Show
@@ -57,7 +57,7 @@ scoreCard c =
     else r
 
 scoreHand :: [Card] -> Integer
-scoreHand cards = 
+scoreHand cards =
     let ranks = [scoreCard c | c <- cards]
         total = sum ranks
     in subtractAces total cards
@@ -69,9 +69,9 @@ scoreHand cards =
                          else score
             in subtractAces score cs
         else score
-        
+
 dealerPlay :: [Card] -> [Card] -> Maybe ([Card], [Card])
-dealerPlay hand deck = 
+dealerPlay hand deck =
     if scoreHand hand < 17 then
         case hit hand deck of
         Just (hand, deck) -> dealerPlay hand deck
@@ -94,8 +94,8 @@ splitHand _ _ = Nothing
 
 type Net = ReaderT Bot IO
 data Bot = Bot { socket :: Handle }
-data Source = NoSource 
-            | UserSource String String 
+data Source = NoSource
+            | UserSource String String
             | ServerSource String deriving Show
 
 data Command = PING
@@ -128,8 +128,6 @@ split pred xs = case dropWhile pred xs of
                 xs' -> x : Main.split pred xs''
                     where (x, xs'') = break pred xs'
 
-
-
 main :: IO ()
 main = bracket connect disconnect loop
   where
@@ -139,7 +137,7 @@ main = bracket connect disconnect loop
 
 connect :: IO Bot
 connect = do
-    printf "Connecting to %s ..." server 
+    printf "Connecting to %s ..." server
     hFlush stdout
     h <- connectTo server (PortNumber (fromIntegral port))
     hSetBuffering h NoBuffering
@@ -162,7 +160,7 @@ parseIRC :: String -> IRCLine
 parseIRC (':' : l) =
     let (src, l') = span (/= ' ') l
         source' = Main.split (== '!') src
-        source'' =  case source' of 
+        source'' =  case source' of
                         [nick, addr] -> UserSource nick addr
                         [addr] -> ServerSource addr
         parsed = parseIRC . drop 1 $  l' in
