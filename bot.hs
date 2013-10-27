@@ -1,4 +1,5 @@
 import Data.List
+import Data.Maybe
 import Network
 import System.IO
 import System.Exit
@@ -509,6 +510,37 @@ doStartGame = do
                 doShowPlayerCards
         Nothing -> privmsg "omg forgot to shuffle deck :("
 
+doHit :: Net ()
+doHit = do
+    gs <- gets gameState
+    let gm = hitCurrentTurn gs
+    when (isJust gm) $ do
+        putGameState (fromJust gm)
+        return ()
+    doShowPlayerCards
+doStand :: Net ()
+doStand = do
+    gs <- gets gameState
+    gs <- putGameState $ standCurrentPlayer gs
+    if turnIsOver gs then do
+        gs' <- putGameState $ moveNextPlayer gs
+        if roundIsOver gs' then do
+            doFinishRound
+            doStartGame
+        else do
+            doShowDealerCard
+            doShowPlayerCards
+    else do
+        doShowPlayerCards
+
+doAutoStands :: Net ()
+doAutoStands = do
+    gs <- gets gameState
+    let score = getCurrentScore gs
+    when (isJust score && fromJust score >= 21) $  do
+        doStand
+        doAutoStands
+
 ircHandler :: IRCLine -> Net ()
 ircHandler line =
     case command line of
@@ -517,57 +549,28 @@ ircHandler line =
         ("!join":_) -> do
             gs <- gets gameState
             putGameState $ addPlayer gs (source line)
-            if playerCount gs == 0 then
-                doStartGame
-            else return ()
+            when (playerCount gs == 0) doStartGame
         ("!hit":_) -> do
             gs <- gets gameState
-            if hasTurn gs (source line) then do
-                case hitCurrentTurn gs of
-                     Just g -> do
-                        putGameState g
-                        return ()
-                     Nothing -> return ()
-                doShowPlayerCards
-            else return ()
+            when (hasTurn gs (source line)) $ do
+                doHit
+                doAutoStands
         ("!stand":_) -> do
             gs <- gets gameState
-            if hasTurn gs (source line) then do
-                gs <- putGameState $ standCurrentPlayer gs
-                if turnIsOver gs then do
-                    gs' <- putGameState $ moveNextPlayer gs
-                    if roundIsOver gs' then do
-                        doFinishRound
-                        doStartGame
-                    else do
-                        doShowDealerCard
-                        doShowPlayerCards
-                else do
-                    doShowPlayerCards
-            else return ()
+            when (hasTurn gs $ source line) $ do
+                doStand
         ("!double":_) -> do
             gs <- gets gameState
-            if hasTurn gs (source line) then do
+            when (hasTurn gs $ source line) $ do
                 gs <- putGameState $ doubleCurrentPlayer gs
                 doShowPlayerCards
-                gs <- putGameState $ standCurrentPlayer gs
-                if turnIsOver gs then do
-                    gs' <- putGameState $ moveNextPlayer gs
-                    if roundIsOver gs' then do
-                        doFinishRound
-                        doStartGame
-                    else do
-                        doShowDealerCard
-                        doShowPlayerCards
-                else do
-                    doShowPlayerCards
-            else return ()
+                doStand
         ("!split":_) -> do
             gs <- gets gameState
-            if hasTurn gs $ source line then do
+            when (hasTurn gs $ source line) $ do
                 gs <- putGameState $ splitCurrentPlayer gs
                 doShowPlayerCards
-            else return ()
+                doAutoStands
         _ -> return ()
     _ -> return ()
 
