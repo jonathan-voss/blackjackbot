@@ -513,9 +513,10 @@ doFinishRound = do
 doStartGame :: Net ()
 doStartGame = do
     g <- gets gameState
-    cards <- io $ if (length $ gameDeck g) < reshuffleLen then
-                      shuffle fourdecks
-                  else return (gameDeck g)
+    cards <- if (length $ gameDeck g) < reshuffleLen then do
+                privmsg "reshuffling deck"
+                io $ shuffle fourdecks
+             else return (gameDeck g)
     g <- putGameState $ g{gameDeck=cards}
     case dealGame g of
         Just g -> do
