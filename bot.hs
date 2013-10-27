@@ -111,7 +111,6 @@ playerWager p =
     let w = sum (map wager . hands $ p) in
     sum (map wager . playedHands $ p) + w
 
-
 hasTurn :: Eq a => Game a -> a -> Bool
 hasTurn game id =
     case players game of
@@ -208,6 +207,16 @@ scoreHand cards =
         else score
     subtractAces score [] =
         score
+
+setWager :: Eq a => Game a -> a -> Integer -> Game a
+setWager game id amt =
+    game { players = map updateWager $ players game
+         , finishedPlayers = map updateWager $ finishedPlayers game
+         }
+  where
+    updateWager :: Eq a => Player a -> Player a
+    updateWager p =
+        p { baseWager = amt }
 
 dealerPlay :: [Card] -> [Card] -> Maybe ([Card], [Card])
 dealerPlay hand deck =
@@ -397,6 +406,7 @@ data Command = PING
              | PRIVMSG String
              | NOTICE String
              | JOIN String
+             | PART String
              | MODE String
              | BEGINMOTD String
              | CONTINUEMOTD String
@@ -478,6 +488,12 @@ doShowDealerCard = do
         [] ->
             privmsg $ "dealer doesn't have cards :X"
 
+showAllPlayers :: [Player Source] -> Net ()
+showAllPlayers (p:ps) = do
+    privmsg $ playerToString p
+    showAllPlayers ps
+showAllPlayers [] = return ()
+
 doFinishRound :: Net ()
 doFinishRound = do
     g <- gets gameState
@@ -497,17 +513,21 @@ doFinishRound = do
 doStartGame :: Net ()
 doStartGame = do
     g <- gets gameState
-    cards <- io $ if (length $ gameDeck g) < reshuffleLen then shuffle fourdecks else return (gameDeck g)
+    cards <- io $ if (length $ gameDeck g) < reshuffleLen then
+                      shuffle fourdecks
+                  else return (gameDeck g)
     g <- putGameState $ g{gameDeck=cards}
     case dealGame g of
         Just g -> do
             putGameState g
             if isBlackjack $ dealerCards g then do
+                showAllPlayers (players g ++ finishedPlayers g)
                 doFinishRound
                 doStartGame
             else do
                 doShowDealerCard
                 doShowPlayerCards
+                doAutoStands
         Nothing -> privmsg "omg forgot to shuffle deck :("
 
 doHit :: Net ()
@@ -518,6 +538,7 @@ doHit = do
         putGameState (fromJust gm)
         return ()
     doShowPlayerCards
+
 doStand :: Net ()
 doStand = do
     gs <- gets gameState
@@ -530,8 +551,10 @@ doStand = do
         else do
             doShowDealerCard
             doShowPlayerCards
+            doAutoStands
     else do
         doShowPlayerCards
+        doAutoStands
 
 doAutoStands :: Net ()
 doAutoStands = do
@@ -541,31 +564,51 @@ doAutoStands = do
         doStand
         doAutoStands
 
+doLeave :: Source -> Net ()
+doLeave source = do
+    gs <- gets gameState
+    when (playerCount gs > 1 && (hasTurn gs $ source)) $ do
+        doStand
+    gs <- gets gameState
+    putGameState $ removePlayer gs (emptyPlayer $ source)
+    return ()
+
 ircHandler :: IRCLine -> Net ()
 ircHandler line =
     case command line of
+    PING ->
+        pong $ payload line
+    PART channel ->
+        doLeave $ source line
     PRIVMSG dest ->
         case words (payload line) of
-        ("!join":_) -> do
+        ["join"] -> do
             gs <- gets gameState
             putGameState $ addPlayer gs (source line)
             when (playerCount gs == 0) doStartGame
-        ("!hit":_) -> do
+        ["leave"] -> do
+            doLeave $ source line
+        ["wager", amt] -> do
+            gs <- gets gameState
+            when (isInteger amt) $ do
+                putGameState $ setWager gs (source line) (read amt)
+                privmsg "that will take effect next round"
+        ["hit"] -> do
             gs <- gets gameState
             when (hasTurn gs (source line)) $ do
                 doHit
                 doAutoStands
-        ("!stand":_) -> do
+        ["stand"] -> do
             gs <- gets gameState
             when (hasTurn gs $ source line) $ do
                 doStand
-        ("!double":_) -> do
+        ["double"] -> do
             gs <- gets gameState
             when (hasTurn gs $ source line) $ do
                 gs <- putGameState $ doubleCurrentPlayer gs
                 doShowPlayerCards
                 doStand
-        ("!split":_) -> do
+        ["split"] -> do
             gs <- gets gameState
             when (hasTurn gs $ source line) $ do
                 gs <- putGameState $ splitCurrentPlayer gs
@@ -576,7 +619,6 @@ ircHandler line =
 
 parseIRC :: String -> IRCLine
 parseIRC (':' : l) =
-
     let (src, l') = span (/= ' ') l
         source' = Main.split (== '!') src
         source'' =  case source' of
@@ -587,7 +629,8 @@ parseIRC (':' : l) =
 parseIRC l =
     let (c, pload) = span (/= ':') l
         (command', args) = case words c of
-            --("PING":args) -> (PING, args)
+            ["PING"] -> (PING, [])
+            ["PART", channel] -> (PART channel, [])
             ("PRIVMSG":dest:args) -> (PRIVMSG dest, args)
             ("NOTICE":dest:args) -> (NOTICE dest, args)
             ["JOIN", channel] -> (JOIN channel, args)
@@ -609,6 +652,9 @@ readLine = do
 
 privmsg :: String -> Net ()
 privmsg s = write "PRIVMSG" (chan ++ " :" ++ s)
+
+pong :: String -> Net ()
+pong s = write "PONG" (":" ++ s)
 
 write :: String -> String -> Net ()
 write s t = do
