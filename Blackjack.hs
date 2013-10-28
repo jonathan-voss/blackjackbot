@@ -217,13 +217,15 @@ removePlayer g p =
 
 setWager :: Eq a => Game a -> a -> Integer -> Game a
 setWager game id amt =
-    game { players = map updateWager $ players game
-         , finishedPlayers = map updateWager $ finishedPlayers game
+    game { players = map (updateWager id) $ players game
+         , finishedPlayers = map (updateWager id) $ finishedPlayers game
          }
   where
-    updateWager :: Eq a => Player a -> Player a
-    updateWager p =
-        p { baseWager = amt }
+    updateWager :: Eq a => a -> Player a -> Player a
+    updateWager id p =
+        if playerID p == id then 
+            p { baseWager = amt }
+        else p
 
 
 dealGame :: Game a -> Maybe (Game a)
