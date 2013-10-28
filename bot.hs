@@ -1,7 +1,5 @@
 import Data.Maybe
-import Text.Printf
 import Control.Monad.State
-import System.IO
 import Blackjack
 import IRC
 
