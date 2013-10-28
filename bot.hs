@@ -157,8 +157,15 @@ ircHandler line =
         ["wager", amt] -> do
             gs <- gets clientState
             when (isInteger amt) $ do
-                putClientState $ setWager gs (source line) (read amt)
-                privmsg chan "that will take effect next round"
+                let amt' = read amt
+                let p = getPlayer gs (source line)
+                when (isJust p) $ do
+                    let p' = fromJust p
+                    if 0 < amt' && amt' <= cash p' then do
+                        putClientState $ setWager gs (source line) amt'
+                        privmsg chan "that will take effect next round"
+                    else do
+                        privmsg chan "nice try"
         ["hit"] -> do
             gs <- gets clientState
             when (hasTurn gs (source line)) $ do

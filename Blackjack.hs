@@ -19,6 +19,7 @@ module Blackjack
 , playerCount
 , hasTurn
 , removePlayer
+, getPlayer
 , emptyPlayer
 , addPlayer
 , splitCurrentPlayer
@@ -181,6 +182,15 @@ isPlayer game id =
     (Nothing, Nothing) -> False
     (_, _) -> True
 
+getPlayer :: Eq a => Game a -> a -> Maybe (Player a)
+getPlayer game id =
+    let p = emptyPlayer id in
+    case (elemIndex p (players game), elemIndex p (finishedPlayers game)) of
+    (Nothing, Nothing) -> Nothing
+    (Just idx, _) -> Just (players game !! idx)
+    (_, Just idx) -> Just (finishedPlayers game !! idx)
+
+
 emptyPlayer :: Eq a => a -> Player a
 emptyPlayer id = Player { hands = []
                         , playedHands = []
@@ -223,7 +233,7 @@ setWager game id amt =
   where
     updateWager :: Eq a => a -> Player a -> Player a
     updateWager id p =
-        if playerID p == id && baseWager p >= amt && amt > 0 then 
+        if playerID p == id && cash p >= amt && amt > 0 then 
             p { baseWager = amt }
         else p
 
