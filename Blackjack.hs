@@ -223,7 +223,7 @@ setWager game id amt =
   where
     updateWager :: Eq a => a -> Player a -> Player a
     updateWager id p =
-        if playerID p == id then 
+        if playerID p == id && baseWager p >= amt && amt > 0 then 
             p { baseWager = amt }
         else p
 
