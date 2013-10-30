@@ -29,6 +29,7 @@ module Blackjack
 , fourdecks
 , reshuffleLen
 , shuffle
+, getCurrentPlayer
 ) where
 
 import Data.List
@@ -367,6 +368,12 @@ moveNextPlayer g =
     (p:ps) ->
         g{players=ps, finishedPlayers=(p:finishedPlayers g)}
     [] -> g
+
+getCurrentPlayer :: Game a -> Maybe (Player a)
+getCurrentPlayer game =
+    case players game of
+    (p:ps) -> Just p
+    [] -> Nothing
 
 getCurrentScore :: Game a -> Maybe Integer
 getCurrentScore game =

@@ -147,45 +147,53 @@ ircHandler line =
     PART channel ->
         doLeave $ source line
     PRIVMSG dest ->
-        case words (payload line) of
-        ["join"] -> do
-            gs <- gets clientState
-            putClientState $ addPlayer gs (source line)
-            when (playerCount gs == 0) doStartGame
-        ["leave"] -> do
-            doLeave $ source line
-        ["wager", amt] -> do
-            gs <- gets clientState
-            when (isInteger amt) $ do
-                let amt' = read amt
-                let p = getPlayer gs (source line)
-                when (isJust p) $ do
-                    let p' = fromJust p
-                    if 0 < amt' && amt' <= cash p' then do
-                        putClientState $ setWager gs (source line) amt'
-                        privmsg chan "that will take effect next round"
-                    else do
-                        privmsg chan "nice try"
-        ["hit"] -> do
-            gs <- gets clientState
-            when (hasTurn gs (source line)) $ do
-                doHit
-                doAutoStands
-        ["stand"] -> do
-            gs <- gets clientState
-            when (hasTurn gs $ source line) $ do
-                doStand
-        ["double"] -> do
-            gs <- gets clientState
-            when (hasTurn gs $ source line) $ do
-                gs <- putClientState $ doubleCurrentPlayer gs
-                doShowPlayerCards
-                doStand
-        ["split"] -> do
-            gs <- gets clientState
-            when (hasTurn gs $ source line) $ do
-                gs <- putClientState $ splitCurrentPlayer gs
-                doShowPlayerCards
-                doAutoStands
-        _ -> return ()
+        when (dest == chan) $ do
+            case words (payload line) of
+                ["join"] -> do
+                    gs <- gets clientState
+                    putClientState $ addPlayer gs (source line)
+                    when (playerCount gs == 0) doStartGame
+                ["whosturn"] -> do
+                    gs <- gets clientState
+                    let p = getCurrentPlayer gs
+                    if isJust p then
+                        privmsg chan . getNick . playerID . fromJust $ p
+                    else
+                        privmsg chan "No one's turn"
+                ["leave"] -> do
+                    doLeave $ source line
+                ["wager", amt] -> do
+                    gs <- gets clientState
+                    when (isInteger amt) $ do
+                        let amt' = read amt
+                        let p = getPlayer gs (source line)
+                        when (isJust p) $ do
+                            let p' = fromJust p
+                            if 0 < amt' && amt' <= cash p' then do
+                                putClientState $ setWager gs (source line) amt'
+                                privmsg chan "that will take effect next round"
+                            else do
+                                privmsg chan "nice try"
+                ["hit"] -> do
+                    gs <- gets clientState
+                    when (hasTurn gs (source line)) $ do
+                        doHit
+                        doAutoStands
+                ["stand"] -> do
+                    gs <- gets clientState
+                    when (hasTurn gs $ source line) $ do
+                        doStand
+                ["double"] -> do
+                    gs <- gets clientState
+                    when (hasTurn gs $ source line) $ do
+                        gs <- putClientState $ doubleCurrentPlayer gs
+                        doShowPlayerCards
+                        doStand
+                ["split"] -> do
+                    gs <- gets clientState
+                    when (hasTurn gs $ source line) $ do
+                        gs <- putClientState $ splitCurrentPlayer gs
+                        doShowPlayerCards
+                        doAutoStands
+                _ -> return ()
     _ -> return ()
