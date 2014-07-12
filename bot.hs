@@ -3,10 +3,10 @@ import Control.Monad.State
 import Blackjack
 import IRC
 
-server = "internet.com"
+server = "ravageduniverse.net"
 port = 6667
-chan = "#bj"
-nickname = "BJBOT"
+chan = "#bjbottest"
+nickname = "omgsersly"
 
 playerToString :: Player Source -> String
 playerToString p =
@@ -142,7 +142,7 @@ doLeave source = do
 ircHandler :: IRCLine -> Net (Game Source) ()
 ircHandler line =
     case command line of
-    PING s ->
+    PING ->
         pong $ payload line
     PART channel ->
         doLeave $ source line
