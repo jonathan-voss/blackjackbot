@@ -3,7 +3,7 @@ import Control.Monad.State
 import Blackjack
 import IRC
 
-server = "avaraline.net"
+server = "internet.com"
 port = 6667
 chan = "#bj"
 nickname = "BJBOT"
@@ -142,7 +142,7 @@ doLeave source = do
 ircHandler :: IRCLine -> Net (Game Source) ()
 ircHandler line =
     case command line of
-    PING ->
+    PING s ->
         pong $ payload line
     PART channel ->
         doLeave $ source line

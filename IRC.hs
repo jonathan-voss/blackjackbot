@@ -21,7 +21,7 @@ import Text.Printf
 import Control.Monad.State
 
 
-data Command = PING
+data Command = PING String
              | PRIVMSG String
              | NOTICE String
              | JOIN String
@@ -59,10 +59,19 @@ close :: SockState a -> IO ()
 close s =
     hClose $ socket s
 
+handlePing :: Net a ()
+handlePing = do
+    sock <- gets socket
+    line <- readLine
+    case command line of PING num -> pong num
+                         PRIVMSG s -> return ()
+                         _ -> handlePing
+
 run :: (IRCLine -> Net a ()) -> String -> String -> Net a ()
 run ircHandler nickname chan = do
     write "NICK" nickname
     write "USER" (nickname++" 0 * :bj bot")
+    handlePing
     write "JOIN" chan
     forever $ do
         sock <- gets socket
@@ -89,7 +98,7 @@ readLine :: Net a IRCLine
 readLine = do
     h <- gets socket
     s <- init `fmap` io (hGetLine h)
-    -- io (putStrLn s)
+    io (putStrLn s)
     return (parseIRC s)
 
 data Source = NoSource
@@ -115,7 +124,7 @@ parseIRC (':' : l) =
 parseIRC l =
     let (c, pload) = span (/= ':') l
         (command', args) = case words c of
-            ["PING"] -> (PING, [])
+            ["PING", args] -> (PING args, [])
             ["PART", channel] -> (PART channel, [])
             ("PRIVMSG":dest:args) -> (PRIVMSG dest, args)
             ("NOTICE":dest:args) -> (NOTICE dest, args)
