@@ -1,25 +1,21 @@
 module IRC
 ( connect
+, auth
+, readLine
 , close
-, run
 , Source(..)
 , getNick
-, Net
-, SockState(..)
-, putClientState
 , IRCLine(..)
 , Command(..)
 , privmsg
 , pong
-, io
 , isInteger
 ) where
 
 import Network
 import System.IO
+import System.IO.Unsafe
 import Text.Printf
-import Control.Monad.State
-
 
 data Command = PING
              | PRIVMSG String
@@ -34,51 +30,30 @@ data Command = PING
              | DONTCARE
              | QUIT deriving Show
 
-type Net a = StateT (SockState a) IO
-
-putClientState :: a -> Net a a
-putClientState g = do
-    s <- get
-    put (s { clientState = g })
-    return g
-
-data SockState a = SockState { socket :: Handle
-                             , clientState :: a
-                             }
-
-connect :: String -> Int -> a -> IO (SockState a)
-connect server port cs = do
+connect :: String -> Int -> IO Handle
+connect server port = do
     printf "Connecting to %s ..." server
     hFlush stdout
     h <- connectTo server (PortNumber (fromIntegral port))
     hSetBuffering h NoBuffering
     putStrLn "done."
-    return (SockState {socket = h, clientState = cs})
+    return h
 
-close :: SockState a -> IO ()
-close s =
-    hClose $ socket s
+close = hClose
 
-handlePing :: Net a ()
-handlePing = do
-    sock <- gets socket
-    line <- readLine
-    case command line of PING -> pong (payload line)
+handlePing :: Handle -> IO ()
+handlePing sock = do
+    line <- readLine sock
+    case command line of PING -> pong  sock (payload line)
                          PRIVMSG s -> return ()
-                         _ -> handlePing
+                         _ -> handlePing sock
 
-run :: (IRCLine -> Net a ()) -> String -> String -> Net a ()
-run ircHandler nickname chan = do
-    write "NICK" nickname
-    write "USER" (nickname++" 0 * :bj bot")
-    handlePing
-    write "JOIN" chan
-    forever $ do
-        sock <- gets socket
-        line <- readLine
-        case command line of UNKNOWN _ -> io (print line)
-                             _ -> ircHandler line
-  where forever a = a >> forever a
+auth :: Handle -> String -> String -> IO ()
+auth sock nickname chan = do
+    write sock "NICK" nickname
+    write sock "USER" (nickname++" 0 * :bj bot")
+    handlePing sock
+    write sock "JOIN" chan
 
 data IRCLine = IRCLine {
       source  :: Source
@@ -86,19 +61,13 @@ data IRCLine = IRCLine {
     , payload :: String
     } deriving Show
 
-write :: String -> String -> Net a ()
-write s t = do
-    h <- gets socket
-    io $ hPrintf h "%s %s\r\n" s t
+write :: Handle -> String -> String -> IO ()
+write h s t = do
+    hPrintf h "%s %s\r\n" s t
 
-io :: IO a -> Net b a
-io = liftIO
-
-readLine :: Net a IRCLine
-readLine = do
-    h <- gets socket
-    s <- init `fmap` io (hGetLine h)
-    io (putStrLn s)
+readLine :: Handle -> IO IRCLine
+readLine h = do
+    s <- init `fmap` hGetLine h
     return (parseIRC s)
 
 data Source = NoSource
@@ -150,9 +119,9 @@ isInteger s =
     [(_, "")] -> True
     _ -> False
 
-privmsg :: String -> String -> Net a ()
-privmsg chan s = write "PRIVMSG" (chan ++ " :" ++ s)
+privmsg :: Handle -> String -> String -> IO ()
+privmsg h chan s = write h "PRIVMSG" (chan ++ " :" ++ s)
 
-pong :: String -> Net a ()
-pong s = write "PONG" (":" ++ s)
+pong :: Handle -> String -> IO ()
+pong h s = write h "PONG" (":" ++ s)
 

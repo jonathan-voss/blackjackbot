@@ -28,16 +28,20 @@ module Blackjack
 , playerWager
 , fourdecks
 , reshuffleLen
-, shuffle
+, shuffleDeck
 , getCurrentPlayer
 ) where
 
 import Data.List
-import Data.Array.IO
 import System.Random
 import Control.Monad
+import Data.Array.ST
+import Control.Monad.ST
+import Data.STRef
 
+defaultWager :: Integer
 defaultWager = 4
+initialCash :: Integer
 initialCash = 100
 
 data Suit = Spades | Hearts | Diamonds | Clubs deriving (Enum, Show)
@@ -68,19 +72,19 @@ data Hand = Hand {
     }
 
 formatCards :: [Card] -> String
-formatCards cards =
-    "[" ++ listJoin " " (map show .reverse $ cards) ++ " (" ++ (show . scoreHand $ cards) ++ ")]"
+formatCards hand =
+    "[" ++ listJoin " " (map show . reverse $ hand) ++ " (" ++ (show . scoreHand $ hand) ++ ")]"
 
 listJoin :: [a] -> [[a]] -> [a]
 listJoin sep (x:xs) =
     x ++ concat (map (sep ++) xs)
-listJoin sep [] = []
+listJoin _ [] = []
 
 scoreHand :: [Card] -> Integer
-scoreHand cards =
-    let ranks = [scoreCard c | c <- cards]
+scoreHand hand =
+    let ranks = [scoreCard c | c <- hand]
         total = sum ranks
-    in subtractAces total cards
+    in subtractAces total hand
   where
     subtractAces :: Integer -> [Card] -> Integer
     subtractAces score (c:cs) =
@@ -115,7 +119,7 @@ splitHand hand deck =
 
 hit :: [Card] -> [Card] -> Maybe ([Card],[Card])
 hit hand (c:cs) = Just (c:hand, cs)
-hit hand [] = Nothing
+hit _ [] = Nothing
 
 hitHand :: Hand -> [Card] -> Maybe (Hand, [Card])
 hitHand hand deck = do
@@ -137,11 +141,18 @@ dealerPlayGame game =
     Just (dc, deck) -> game{dealerCards=dc, gameDeck=deck}
     Nothing -> game
 
+shuffleDeck :: Game a -> [Card] -> Game a
+shuffleDeck game deck =
+    let (deck', genstate') = shuffle' deck $ genstate game in
+    game { genstate=genstate', gameDeck=deck' }
+    
+
 data Game a = Game {
       gameDeck          :: [Card]
     , players           :: [Player a]
     , finishedPlayers   :: [Player a]
     , dealerCards       :: [Card]
+    , genstate          :: StdGen
     } deriving Show
 
 data Player a = Player {
@@ -158,13 +169,14 @@ instance Show Hand where
 instance Eq m => Eq (Player m) where
     p1 == p2 = playerID p1 == playerID p2
 
-newGame :: [Card] -> Game a
-newGame deck = Game {
-    gameDeck = deck
+newGame :: [Card] -> StdGen -> Game a
+newGame deck gen = Game {
+    gameDeck = deck'
   , players = []
   , finishedPlayers = []
   , dealerCards = []
-  }
+  , genstate = gen'
+  } where (deck', gen') = shuffle' deck gen
 
 playerCount :: Game a -> Int
 playerCount game = length (players game) + length (finishedPlayers game)
@@ -233,8 +245,8 @@ setWager game id amt =
          }
   where
     updateWager :: Eq a => a -> Player a -> Player a
-    updateWager id p =
-        if playerID p == id && cash p >= amt && amt > 0 then 
+    updateWager id' p =
+        if playerID p == id' && cash p >= amt && amt > 0 then 
             p { baseWager = amt }
         else p
 
@@ -372,14 +384,14 @@ moveNextPlayer g =
 getCurrentPlayer :: Game a -> Maybe (Player a)
 getCurrentPlayer game =
     case players game of
-    (p:ps) -> Just p
+    (p:_) -> Just p
     [] -> Nothing
 
 getCurrentScore :: Game a -> Maybe Integer
 getCurrentScore game =
     case players game of
-    (p:ps) -> case hands p of
-              (h:hs) -> Just (scoreHand (cards h))
+    (p:_) -> case hands p of
+              (h:_) -> Just (scoreHand (cards h))
               [] -> Nothing
     [] -> Nothing
 
@@ -388,23 +400,32 @@ playerWager p =
     let w = sum (map wager . hands $ p) in
     sum (map wager . playedHands $ p) + w
 
-
-
+deck :: [Card]
 deck = [Card{rank=r,suit=s} | r <- [1..13], s <- [Spades .. Clubs]]
+twodecks :: [Card]
 twodecks = concat [deck, deck]
+fourdecks :: [Card]
 fourdecks = concat [twodecks, twodecks]
-reshuffleLen = 52 :: Int
+reshuffleLen :: Int
+reshuffleLen = 52
 
-shuffle :: [a] -> IO [a]
-shuffle xs = do
-    ar <- newArray n xs
-    forM [1..n] $ \i -> do
-        j <- randomRIO (i,n)
-        vi <- readArray ar i
-        vj <- readArray ar j
-        writeArray ar j vi
-        return vj
+shuffle' :: [a] -> StdGen -> ([a],StdGen)
+shuffle' xs gen = runST (do
+        g <- newSTRef gen
+        let randomRST lohi = do
+              (a,s') <- liftM (randomR lohi) (readSTRef g)
+              writeSTRef g s'
+              return a
+        ar <- newArray n xs
+        xs' <- forM [1..n] $ \i -> do
+                j <- randomRST (i,n)
+                vi <- readArray ar i
+                vj <- readArray ar j
+                writeArray ar j vi
+                return vj
+        gen' <- readSTRef g
+        return (xs',gen'))
   where
     n = length xs
-    newArray :: Int -> [a] -> IO (IOArray Int a)
-    newArray n xs = newListArray (1,n) xs
+    newArray :: Int -> [a] -> ST s (STArray s Int a)
+    newArray n xs =  newListArray (1,n) xs
