@@ -52,7 +52,7 @@ auth :: Handle -> String -> String -> IO ()
 auth sock nickname chan = do
     write sock "NICK" nickname
     write sock "USER" (nickname++" 0 * :bj bot")
-    handlePing sock
+    --handlePing sock
     write sock "JOIN" chan
 
 data IRCLine = IRCLine {
@@ -68,6 +68,7 @@ write h s t = do
 readLine :: Handle -> IO IRCLine
 readLine h = do
     s <- init `fmap` hGetLine h
+
     return (parseIRC s)
 
 data Source = NoSource
@@ -92,14 +93,14 @@ parseIRC (':' : l) =
     IRCLine {source=source'', command=(command parsed), payload=(payload parsed)}
 parseIRC l =
     let (c, pload) = span (/= ':') l
-        (command', args) = case words c of
+        (command', rest) = case words c of
             ["PING"] -> (PING, [])
             ["PART", channel] -> (PART channel, [])
             ("PRIVMSG":dest:args) -> (PRIVMSG dest, args)
             ("NOTICE":dest:args) -> (NOTICE dest, args)
-            ["JOIN", channel] -> (JOIN channel, args)
-            ["JOIN"] -> (JOIN (head args), tail args)
-            ["MODE", user] -> (MODE user, args)
+            ["JOIN", channel] -> (JOIN channel, [])
+            ["JOIN"] -> (JOIN (drop 1 pload), [])
+            ["MODE", user] -> (MODE user, [])
             ["375", dest] -> (BEGINMOTD dest, [])
             ["372", dest] -> (CONTINUEMOTD dest, [])
             ["376", dest] -> (ENDMOTD dest, [])
