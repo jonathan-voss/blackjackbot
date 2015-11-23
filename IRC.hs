@@ -52,7 +52,7 @@ auth :: Handle -> String -> String -> IO ()
 auth sock nickname chan = do
     write sock "NICK" nickname
     write sock "USER" (nickname++" 0 * :bj bot")
-    --handlePing sock
+    handlePing sock
     write sock "JOIN" chan
 
 data IRCLine = IRCLine {

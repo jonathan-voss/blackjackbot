@@ -1,16 +1,19 @@
 import Data.Maybe
+import Data.IORef
 import System.IO
 import System.Random
 import Control.Monad.Writer
+import Control.Concurrent
+import Control.Concurrent.Chan
 import Blackjack
 import IRC
 
 server :: String
-server = "avaraline.net"
+server = "yourirc.net"
 port :: Int
 port = 6667
 chan :: String
-chan = "#bj"
+chan = "#blackjack"
 nickname :: String
 nickname = "bjbot"
 
@@ -25,17 +28,50 @@ playerToString p =
         allHands = listJoin " " (reverse playedS ++ handsS)
     in getNick (playerID p) ++ " $" ++ show w ++ " ($" ++ show (cash p) ++ ") " ++ allHands
 
+
+readToChan :: Chan (Either IRCLine Bool) -> Handle -> IO ()
+readToChan chan h = do
+    ircline <- readLine h
+    writeChan chan $ Left ircline
+    readToChan chan h
+
+
+timeout :: Chan (Either IRCLine Bool) -> IO ()
+timeout chan = do
+    threadDelay 60000000
+    writeChan chan $ Right True
+
 main :: IO ()
 main = do
     h <- connect server port
     gen <- newStdGen
     let gs = newGame fourdecks gen
     auth h nickname chan
-    let go gamestate = do
-        ircline <- readLine h
-        gs' <- ircHandler h gamestate ircline
-        go gs'
-    go gs
+    ircchan <- newChan
+    chan2 <- dupChan ircchan
+    forkIO $ readToChan ircchan h
+    timeoutThread <- forkIO $ timeout chan2
+    let go gamestate thred = do
+        msg <- readChan ircchan
+        case msg of
+            Left ircline -> do
+                let fromCurrentPlayer = fmap ((== source ircline) . playerID) . getCurrentPlayer $ gamestate
+                threadId <-  if fromMaybe False fromCurrentPlayer then do
+                                killThread thred
+                                forkIO $ timeout chan2
+                             else
+                                return thred
+                gs' <- ircHandler h gamestate ircline
+                go gs' threadId
+            Right _ -> do
+                thredId <- forkIO $ timeout chan2
+                let removePlayer = fmap (leave gamestate . playerID) . getCurrentPlayer $ gamestate
+                let withtell = fmap (\writer -> tell ["removing idle player"] >> writer) removePlayer
+                let (gs, lines) = fromMaybe (gamestate, [])
+                                            (fmap runWriter withtell)
+                mapM_ (privmsg h chan) lines
+                go gs thredId
+    go gs timeoutThread
     close h
 
 leave :: Game Source -> Source -> Writer [String] (Game Source)
@@ -70,16 +106,16 @@ stand gs = do
 
 autoStands :: Game Source -> Writer [String] (Game Source)
 autoStands gs =
-    let score = getCurrentScore gs in 
+    let score = getCurrentScore gs in
     if (isJust score && fromJust score >= 21) then do
-        gs <- stand gs 
+        gs <- stand gs
         autoStands gs
     else
         return gs
 
 finishRound :: Game Source -> Writer [String] (Game Source)
 finishRound g = do
-    g <- return $ dealerPlayGame g 
+    g <- return $ dealerPlayGame g
     (g, ps) <- return $ getResults g
     tell [ "I have " ++ formatCards (dealerCards g)
          , (listJoin " " (map genreport ps))
@@ -127,8 +163,9 @@ showPlayerCards g = do
         [] -> tell ["uhh no players??"]
 
 showAllPlayers :: [Player Source] -> Writer [String] ()
-showAllPlayers gs = 
+showAllPlayers gs =
     mapM_ (\s -> tell [playerToString s]) gs
+
 
 ircHandler :: Handle -> Game Source -> IRCLine -> IO (Game Source)
 ircHandler h g line =
@@ -140,14 +177,14 @@ ircHandler h g line =
             let (gamestate, response) = (runWriter (process g line))
             mapM_ (\s -> privmsg h chan s) response
             return gamestate
-            
+
 process :: Game Source -> IRCLine -> Writer [String] (Game Source)
 process gs line =
-    case command line of 
+    case command line of
         PART _ ->
             leave gs $ source line
         PRIVMSG dest ->
-            if dest == chan then 
+            if dest == chan then
                 case words (payload line) of
                     ["join"] -> do
                         gs <- return $ addPlayer gs (source line)
@@ -155,29 +192,31 @@ process gs line =
                         else return gs
                     ["whosturn"] -> do
                         let response = case getCurrentPlayer gs of
-                                                Just p -> 
+                                                Just p ->
                                                     [getNick . playerID $ p]
-                                                Nothing -> 
+                                                Nothing ->
                                                     ["No one's turn"]
                         tell response
                         return gs
                     ["leave"] ->
                         leave gs $ source line
                     ["wager", amt] ->
-                        let amt' = read amt in
-                        case getPlayer gs (source line) of
-                            Just p ->
+                        let maybeRead = fmap fst . listToMaybe . reads
+                            amt' = maybeRead amt in
+
+                        case (amt', getPlayer gs (source line)) of
+                            (Just amt', Just p) ->
                                 if 0 < amt' && amt' <= cash p then do
                                     tell ["that will take effect next round"]
                                     return $ setWager gs (source line) amt'
                                 else do
                                     tell ["nice try"]
                                     return gs
-                            Nothing ->
+                            (_, _) ->
                                 return gs
                     ["hit"] ->
                         if hasTurn gs (source line) then do
-                            gs <- hit gs 
+                            gs <- hit gs
                             autoStands gs
                         else return gs
                     ["stand"] ->
@@ -186,7 +225,7 @@ process gs line =
                         else return gs
                     ["double"] ->
                         if hasTurn gs $ source line then do
-                            gs <- return $ doubleCurrentPlayer gs 
+                            gs <- return $ doubleCurrentPlayer gs
                             showPlayerCards gs
                             stand gs
                         else return gs
